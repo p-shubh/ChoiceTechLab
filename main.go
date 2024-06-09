@@ -24,7 +24,7 @@ func init() {
 	fmt.Printf("%+v\n", *config.LoadConfig())
 	func() {
 		connections.ConnectMySQL()
-		redis_operation.ConnectRedis(config.LoadConfig().RedisAddr, config.LoadConfig().RedisPassword, config.LoadConfig().RedisDB)
+		redis_operation.ConnectRediss()
 	}()
 }
 func main() {

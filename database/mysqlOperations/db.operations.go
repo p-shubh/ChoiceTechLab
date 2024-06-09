@@ -1,29 +1,19 @@
 package connections
 
 import (
-	"context"
 	"database/sql"
-	"encoding/json"
 	"excel-file-upload/config"
-	redis_operation "excel-file-upload/database/redis"
 	model "excel-file-upload/models"
+	"fmt"
 	"log"
-	"net/http"
-	"strconv"
-	"time"
 
-	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-var db = DbConnection()
-
-var rdb = redis_operation.Rdb
-var ctx = context.Background()
-
 func ConnectMySQL() {
 	var err error
-	// var db = DbConnection()
+	var db = DbConnection()
+	defer db.Close()
 	dsn := config.LoadConfig().MySQLDSN
 	db, err = sql.Open("mysql", dsn)
 	if err != nil {
@@ -49,6 +39,8 @@ func DbConnection() *sql.DB {
 }
 
 func CreateTable() {
+	var db = DbConnection()
+	defer db.Close()
 	_, err := db.Exec(`
 	CREATE TABLE IF NOT EXISTS records (
 		id INT AUTO_INCREMENT,
@@ -71,7 +63,9 @@ func CreateTable() {
 	}
 }
 
-func StoreToMySQL(records []model.Record) {
+func StoreToMySQL(records []model.Record) []model.Record {
+	var db = DbConnection()
+	defer db.Close()
 	for _, record := range records {
 		_, err := db.Exec("INSERT INTO records (first_name, last_name, company_name, address, city, county, postal, phone, email, web) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			record.FirstName, record.LastName, record.CompanyName, record.Address, record.City, record.County, record.Postal, record.Phone, record.Email, record.Web)
@@ -79,76 +73,21 @@ func StoreToMySQL(records []model.Record) {
 			log.Printf("Failed to insert record into MySQL: %v", err)
 		}
 	}
-}
-
-func CacheRecords(records []model.Record) {
-	data, err := json.Marshal(records)
+	rows, err := db.Query("SELECT id, first_name, last_name, company_name, address, city, county, postal, phone, email, web FROM records")
 	if err != nil {
-		log.Fatalf("Failed to marshal records: %v", err)
+		fmt.Println("error", "Failed to fetch records")
+		return nil
 	}
-	err = rdb.Set(ctx, "records", data, 5*time.Minute).Err()
-	if err != nil {
-		log.Fatalf("Failed to cache records in Redis: %v", err)
-	}
-}
-
-func UpdateRecord(c *gin.Context) {
-	id := c.Param("id")
-	var record model.Record
-	if err := c.BindJSON(&record); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
-		return
-	}
-
-	_, err := db.Exec("UPDATE records SET first_name = ?, last_name = ?, company_name = ?, address = ?, city = ?, county = ?, postal = ?, phone = ?, email = ?, web = ? WHERE id = ?",
-		record.FirstName, record.LastName, record.CompanyName, record.Address, record.City, record.County, record.Postal, record.Phone, record.Email, record.Web, id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update record in MySQL"})
-		return
-	}
-
-	// Update cache
-	data, err := rdb.Get(ctx, "records").Result()
-	if err == nil {
-		var records []model.Record
-		err := json.Unmarshal([]byte(data), &records)
-		if err == nil {
-			for i, r := range records {
-				if strconv.Itoa(r.Id) == id {
-					records[i] = record
-					break
-				}
-			}
-			CacheRecords(records)
+	defer rows.Close()
+	var recordss []model.Record
+	for rows.Next() {
+		var record model.Record
+		err := rows.Scan(&record.Id, &record.FirstName, &record.LastName, &record.CompanyName, &record.Address, &record.City, &record.County, &record.Postal, &record.Phone, &record.Email, &record.Web)
+		if err != nil {
+			fmt.Println("error", "Failed to scan record")
+			return nil
 		}
+		recordss = append(recordss, record)
 	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "Record updated successfully"})
-}
-
-func DeleteRecord(c *gin.Context) {
-	id := c.Param("id")
-	_, err := db.Exec("DELETE FROM records WHERE id = ?", id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete record from MySQL"})
-		return
-	}
-
-	// Update cache
-	data, err := rdb.Get(ctx, "records").Result()
-	if err == nil {
-		var records []model.Record
-		err := json.Unmarshal([]byte(data), &records)
-		if err == nil {
-			for i, r := range records {
-				if strconv.Itoa(r.Id) == id {
-					records = append(records[:i], records[i+1:]...)
-					break
-				}
-			}
-			CacheRecords(records)
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "Record deleted successfully"})
+	return recordss
 }
