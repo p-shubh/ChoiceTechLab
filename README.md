@@ -117,6 +117,4 @@ The application includes error handling mechanisms to gracefully handle failures
 ## Optimization and Scalability
 The application is designed to handle increased traffic and data volume efficiently. Database queries and Redis operations are optimized for better performance. The architecture can be scaled horizontally to meet the demand.
 
-## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 ```
